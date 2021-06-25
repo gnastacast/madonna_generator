@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Madonna Generator</title>
+    <link rel="stylesheet" href="./css/normalize.css"/>
+</head>
+<body style="overflow:hidden; height:100vh; width:100vw;">
+    <div id="output" style="height:10vh; width:110vw; background-color:black;">
+        <canvas id="the_canvas" style="height:100vmin; width:100vmin; position:absolute; left:0; top:0;">
+            Your browser does not support the canvas element.
+        </canvas>
+        <!-- <img src="./data/thumbs-clean/delaunay.svg#svgView(preserveAspectRatio(none))" width="250px" height="100%" viewBox="0 0 60 55" preserveAspectRatio="none"> -->
+        <canvas id="delaunay_canvas" style=" position:absolute; bottom:0; right:0;">
+            Your browser does not support the canvas element.
+        </canvas>
+        <canvas id="overlay_canvas" style=" position:absolute; bottom:0; right:0;">
+            Your browser does not support the canvas element.
+        </canvas>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
+    <script src="./js/kdTree.js"></script>
+    <script type="text/javascript">
+        const output = document.getElementById('output');
+        const cnvs = document.getElementById("the_canvas");
+        const delaunay = document.getElementById("delaunay_canvas");
+        const overlay = document.getElementById("overlay_canvas");
+
+        var tsne = []
+        var tsne_bbox = [0,0,0,0]
+        var tsne_tri = []
+
+        const latent_var = [11.94470968, -6.4896803, -1.18980427, -0.44089601, -1.59075152, 10.75543484, -3.24098934, 5.64322608, 4.76324241, 12.26807245, 8.28903347, 3.1099156, 7.6541635, 5.11402144, 1.19510626, 3.15193802, 5.19252589, 6.14187212, -4.28683991, -1.82968371, -5.6869148, -13.60748962, 8.89712415, 11.24298384, 0.42836977, -0.96526101, -2.24829745, 4.85953582, -3.0455574, 1.53908649, -7.91937087, 9.88911272, -1.56878482, -3.27243606, 2.12553021, 3.38624809, -2.85075853, -6.39206191, 1.1622242, -6.57699692, 2.34353759, 0.76800549, 1.65909219, 4.05434995, 0.52487985, -14.80160087, -1.63501942, -0.06735946, -0.17773132, 6.35159497, 15.18199292, 15.26824936, -0.89350926, 7.02438595, -4.11427147, 5.55028791, 1.28204918, 5.42960595, -2.09587162, 3.71855721, -3.90875359, -5.214915, -10.46146024, -3.77384753, -5.55276136, -1.6336037, 8.42380298, 6.24720114, 2.12812616 , -7.02699587, -9.24637498, 2.79418736, -1.05101724, -6.34569855, 2.20263905, -7.10409686, 9.49288761, -3.92046927, -6.25275616 , -0.73599466, 1.81109328, 5.89127312, -2.56593316, -0.79492302, 4.96810895, 9.32917921, -2.81617383, 6.22792958, 0.02131052, -10.25925697, -0.1128571, -3.94937767, 0.69497434, 1.39447441, 5.01423512, 7.07907275, -7.32156948, 6.5976909, -1.40118827, -4.17302279];
+
+        function resizeCanvas() {
+          let height = window.innerHeight;
+          let width =  window.innerWidth;
+          let sqSize = Math.min(height, width);
+          let ctx = delaunay.getContext("2d");
+          if (height > width)
+          {
+            delaunay.width = width;
+            delaunay.height = height - sqSize;
+          } else
+          {
+            delaunay.height = height;
+            delaunay.width = width - sqSize;
+          }
+          ctx.fillStyle = "white";
+          ctx.fillRect(0, 0, delaunay.width, delaunay.height);
+          ratioW = delaunay.width  / (tsne_bbox[2] - tsne_bbox[0])
+          ratioH = delaunay.height / (tsne_bbox[3] - tsne_bbox[1])
+          for (var i = 0; i < tsne.length; i++) {
+            // console.log(pt[0])
+            let pt = tsne[i];
+            ctx.beginPath();
+            ctx.arc(pt[0] * ratioW - tsne_bbox[0] * ratioW,
+                    pt[1] * ratioH - tsne_bbox[1] * ratioH, Math.max(height, width) / 200, 0, Math.PI*2);
+            ctx.fillStyle = "#1F77B4";
+            ctx.fill();
+          }
+
+          ctx.beginPath();
+          for (var i = 0; i < tsne_tri.length; i++) {
+            let a = tsne[tsne_tri[i][0]];
+            ctx.moveTo(a[0] * ratioW - tsne_bbox[0] * ratioW, a[1] * ratioH - tsne_bbox[1] * ratioH);
+            let b = tsne[tsne_tri[i][1]];
+            ctx.lineTo(b[0] * ratioW - tsne_bbox[0] * ratioW, b[1] * ratioH - tsne_bbox[1] * ratioH);
+            let c = tsne[tsne_tri[i][2]];
+            ctx.lineTo(c[0] * ratioW - tsne_bbox[0] * ratioW, c[1] * ratioH - tsne_bbox[1] * ratioH);
+            ctx.closePath();
+          }
+          ctx.strokeStyle = '#1F77B4';
+          ctx.stroke();
+
+
+          let ctxOverlay = overlay.getContext("2d");
+          overlay.height = delaunay.height;
+          overlay.width = delaunay.width;
+        }
+
+        window.onresize = resizeCanvas;
+
+        class FaceNet {
+          constructor() {}
+
+          async load() {
+            this.model = await tf.loadGraphModel('./js/model.json');
+          }
+
+          dispose() {
+            if (this.model) {
+              this.model.dispose();
+            }
+          }
+
+          /**
+           * @param input latent space face vector
+           * @return The decoded image.
+           */
+          predict(input) {
+            return this.model.execute(
+                {["latent_var"]: input}, "add");
+          }
+        }
+
+        const faceNet = new FaceNet();
+        var points = [];
+        var tree;
+        var latent_vars = [];
+        var busy = false;
+
+        async function call_facenet(vector) {
+            var input = tf.tensor2d(vector, [1, 100])
+            var result = faceNet.predict(input);
+            var min = result.min();
+            var max = result.max();
+            var range = max.sub(min);
+            var image = result.reshape([64,64,3])
+            var image_sub = image.sub(min)
+            var image_div = image_sub.div(range)
+            await tf.browser.toPixels(image_div, cnvs); 
+            await tf.nextFrame();
+            input.dispose();
+            result.dispose();
+            min.dispose();
+            max.dispose();
+            range.dispose();
+            image.dispose();
+            image_sub.dispose();
+            image_div.dispose();
+        }
+
+        function loadJSON(callback, filename) {   
+            var xobj = new XMLHttpRequest();
+                xobj.overrideMimeType("application/json");
+                xobj.open('GET', filename, true); // Replace 'my_data' with the path to your file
+            xobj.onreadystatechange = function () {
+                if (xobj.readyState == 4 && xobj.status == "200") {
+                   // Required use of an anonymous callback as .open will NOT return a value but simply returns undefined in asynchronous mode
+                   callback(xobj.responseText);
+                }
+            };
+            xobj.send(null);  
+        }
+
+        function distance(a, b) {
+            var dx = a.x-b.x;
+            var dy = a.y-b.y;
+            return dx*dx + dy*dy;
+        }
+
+        function load_delaunay() {
+            loadJSON(function(response) {
+                // Parse JSON string into object
+                let data = JSON.parse(response);
+                tsne = data.tsne
+                tsne_bbox = data.bbox
+                tsne_tri = data.tri
+                for(var i=0; i<tsne.length; i++) {
+                  var point = {x: tsne[i][0], y: tsne[i][1], id: i};
+                  points.push(point);
+                }
+                tree = new kdTree(points, distance, ["x", "y"]);
+            }, "./js/delaunay.json");
+            loadJSON(function(response) {
+                // Parse JSON string into object
+                let data = JSON.parse(response);
+                latent_vars = data.latent_vars;
+            }, "./js/latent_vars.json");
+        }
+
+        // Normal distribution from https://github.com/errcw/gaussian/blob/master/lib/gaussian.js
+        function normalpdf(mean, variance, x){   //HASTINGS.  MAX ERROR = .000001
+            if (variance <= 0) {
+              throw new Error('Variance must be > 0 (but was ' + variance + ')');
+            }
+            standardDeviation = Math.sqrt(variance);
+            var m = standardDeviation * Math.sqrt(2 * Math.PI);
+            var e = Math.exp(-Math.pow(x - mean, 2) / (2 * variance));
+            return e / m;
+        }
+
+        function mouse_click(e) {
+            if(busy) {
+                return
+            }
+
+            let height = window.innerHeight;
+            let width =  window.innerWidth;
+            ratioW = delaunay.width  / (tsne_bbox[2] - tsne_bbox[0])
+            ratioH = delaunay.height / (tsne_bbox[3] - tsne_bbox[1])
+            var x = e.offsetX / ratioW + tsne_bbox[0]
+              , y = e.offsetY / ratioH + tsne_bbox[1];
+
+            var n_points = 10;
+            var nearest = tree.nearest({'x': x, 'y': y}, n_points);
+            var distance_sum = 0
+            for (var i = 0; i < nearest.length; i++) {
+                distance_sum += Math.pow(nearest[i][1],2);
+            }
+            variance = distance_sum / n_points;
+
+            var weight_sum = 0;
+            var weights = [];
+            for (var i = 0; i < nearest.length; i++) {
+                var weight = normalpdf(0, variance / 5, nearest[i][1]);
+                weight_sum += weight;
+                weights.push(weight);
+            }
+
+            let ctx = overlay.getContext("2d");
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+            var meanX = 0;
+            var meanY = 0;
+            ctx.beginPath();
+            // Calculate weighted averages
+            for (var i = 0; i < nearest.length; i++) {
+                weights[i] /= weight_sum
+                var x = nearest[i][0].x;
+                var y = nearest[i][0].y;
+                meanX += x * weights[i];
+                meanY += y * weights[i];
+                for (var j =0; j < latent_var.length; j++) {
+                    if (i==0) {latent_var[j] = 0}
+                    latent_var[j] += latent_vars[nearest[i][0].id][j] * weights[i];
+                }
+                // Draw weighted dots on overlay
+                var canvasX = (x - tsne_bbox[0]) * ratioW
+                var canvasY = (y - tsne_bbox[1]) * ratioH
+                ctx.moveTo(canvasX, canvasY)
+                ctx.arc(canvasX, canvasY, Math.max(height, width) / 50 * weights[i], 0, Math.PI*2);
+            }
+            ctx.fillStyle = "blue";
+            ctx.fill();
+            // Draw center dot
+            ctx.beginPath();
+            ctx.arc((meanX - tsne_bbox[0]) * ratioW,
+                    (meanY - tsne_bbox[1]) * ratioH,
+                    Math.max(height, width) / 200, 0, Math.PI*2);
+            ctx.fillStyle = "red";
+            ctx.fill();
+
+            busy = true;
+            call_facenet(latent_var).then(busy = false);
+        }
+
+        async function load_facenet() {
+            console.log("LOADING")
+            console.time('Loading of model');
+            await faceNet.load().then(console.log(faceNet));
+            console.timeEnd('Loading of model');
+            call_facenet(latent_var);
+            resizeCanvas();
+        }
+
+
+        overlay.addEventListener('click', mouse_click, false);
+        overlay.addEventListener('mousemove', mouse_click, false);
+
+        load_facenet();
+        load_delaunay();
+
+    </script>
+    <!-- <script type="module" src="index.js"></script> -->
+    <!-- <script type="text/javascript" source="tf.min.js"></script>
+    <script type="text/javascript">
+        
+    </script> -->
+</body>
+</html>
