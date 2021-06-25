@@ -3,20 +3,25 @@
 <head>
     <title>Madonna Generator</title>
     <link rel="stylesheet" href="./css/normalize.css"/>
+    <style type="text/css">
+        html, body { min-height: 100%; }
+    </style>
 </head>
-<body style="overflow:hidden; height:100vh; width:100vw;">
-    <div id="output" style="height:10vh; width:110vw; background-color:black;">
-        <canvas id="the_canvas" style="height:100vmin; width:100vmin; position:absolute; left:0; top:0;">
-            Your browser does not support the canvas element.
-        </canvas>
-        <!-- <img src="./data/thumbs-clean/delaunay.svg#svgView(preserveAspectRatio(none))" width="250px" height="100%" viewBox="0 0 60 55" preserveAspectRatio="none"> -->
-        <canvas id="delaunay_canvas" style=" position:absolute; bottom:0; right:0;">
-            Your browser does not support the canvas element.
-        </canvas>
-        <canvas id="overlay_canvas" style=" position:absolute; bottom:0; right:0;">
-            Your browser does not support the canvas element.
-        </canvas>
+<body>
+    <div id="wrapper" style="overflow:hidden; height:100vh; width:100vw;">
+        <div id="output" style="height:10vh; width:110vw; background-color:black;">
+            <canvas id="the_canvas" style="height:100vmin; width:100vmin; position:absolute; left:0; top:0;">
+                Your browser does not support the canvas element.
+            </canvas>
+            <!-- <img src="./data/thumbs-clean/delaunay.svg#svgView(preserveAspectRatio(none))" width="250px" height="100%" viewBox="0 0 60 55" preserveAspectRatio="none"> -->
+            <canvas id="delaunay_canvas" style=" position:absolute; bottom:0; right:0;">
+                Your browser does not support the canvas element.
+            </canvas>
+            <canvas id="overlay_canvas" style=" position:absolute; bottom:0; right:0;">
+                Your browser does not support the canvas element.
+            </canvas>
 
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
@@ -182,17 +187,29 @@
             return e / m;
         }
 
-        function mouse_click(e) {
+        function mouse_click(event) {
             if(busy) {
                 return
             }
 
+            if(event.touches == undefined) { e = event; }
+                else { e = event.targetTouches[0]; }
+
             let height = window.innerHeight;
             let width =  window.innerWidth;
-            ratioW = delaunay.width  / (tsne_bbox[2] - tsne_bbox[0])
-            ratioH = delaunay.height / (tsne_bbox[3] - tsne_bbox[1])
-            var x = e.offsetX / ratioW + tsne_bbox[0]
-              , y = e.offsetY / ratioH + tsne_bbox[1];
+
+            var x, y;
+            var rect = e.target.getBoundingClientRect();
+            var x = Math.min(rect.right , Math.max(0, e.pageX - rect.left));
+            var y = Math.min(rect.bottom, Math.max(0, e.pageY - rect.top ));
+
+            ratioW = (rect.right - rect.left) / (tsne_bbox[2] - tsne_bbox[0])
+            ratioH = (rect.bottom - rect.top) / (tsne_bbox[3] - tsne_bbox[1])
+
+            x = x / ratioW + tsne_bbox[0]
+            y = y / ratioH + tsne_bbox[1];
+
+            console.log(x,y)
 
             var n_points = 10;
             var nearest = tree.nearest({'x': x, 'y': y}, n_points);
@@ -258,6 +275,13 @@
 
         overlay.addEventListener('click', mouse_click, false);
         overlay.addEventListener('mousemove', mouse_click, false);
+        overlay.addEventListener('touchstart', mouse_click, false);
+        overlay.addEventListener('touchmove', mouse_click, false);
+
+        cnvs.addEventListener('click', mouse_click, false);
+        cnvs.addEventListener('mousemove', mouse_click, false);
+        cnvs.addEventListener('touchstart', mouse_click, false);
+        cnvs.addEventListener('touchmove', mouse_click, false);
 
         load_facenet();
         load_delaunay();
