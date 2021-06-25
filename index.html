@@ -188,6 +188,7 @@
         }
 
         function mouse_click(event) {
+            event.preventDefault();
             if(busy) {
                 return
             }
