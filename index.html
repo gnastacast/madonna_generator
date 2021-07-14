@@ -6,6 +6,7 @@
     <style type="text/css">
         html, body { min-height: 100%; }
     </style>
+    <meta charset="utf-8">
 </head>
 <body>
     <div id="wrapper" style="overflow:hidden; height:100vh; width:100vw;">
@@ -23,6 +24,7 @@
 
         </div>
     </div>
+    <div id="info" style="position:absolute; right:1vw; top:1vw; font-size: 5rem"><a href="poster.pdf" style="text-decoration: none">📃</a></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
     <script src="./js/kdTree.js"></script>
@@ -207,10 +209,8 @@
             ratioW = (rect.right - rect.left) / (tsne_bbox[2] - tsne_bbox[0])
             ratioH = (rect.bottom - rect.top) / (tsne_bbox[3] - tsne_bbox[1])
 
-            x = x / ratioW + tsne_bbox[0]
+            x = x / ratioW + tsne_bbox[0];
             y = y / ratioH + tsne_bbox[1];
-
-            console.log(x,y)
 
             var n_points = 10;
             var nearest = tree.nearest({'x': x, 'y': y}, n_points);
@@ -229,6 +229,17 @@
             }
 
             let ctx = overlay.getContext("2d");
+
+            // Ratio between windows for drawing
+            let drawRatioW = 1;
+            let drawRatioH = 1;
+            if (e.target != ctx.canvas) {
+            	drawRatioW = ctx.canvas.getBoundingClientRect().width / e.target.getBoundingClientRect().width;
+            	drawRatioH = ctx.canvas.getBoundingClientRect().height / e.target.getBoundingClientRect().height;
+            }
+            console.log(e.target, ctx.canvas)
+            console.log(("DRAW RATIO: " +  drawRatioW + " " + drawRatioH))
+
             ctx.clearRect(0, 0, overlay.width, overlay.height);
             var meanX = 0;
             var meanY = 0;
@@ -236,8 +247,8 @@
             // Calculate weighted averages
             for (var i = 0; i < nearest.length; i++) {
                 weights[i] /= weight_sum
-                var x = nearest[i][0].x;
-                var y = nearest[i][0].y;
+                let x = nearest[i][0].x;
+                let y = nearest[i][0].y;
                 meanX += x * weights[i];
                 meanY += y * weights[i];
                 for (var j =0; j < latent_var.length; j++) {
@@ -245,8 +256,8 @@
                     latent_var[j] += latent_vars[nearest[i][0].id][j] * weights[i];
                 }
                 // Draw weighted dots on overlay
-                var canvasX = (x - tsne_bbox[0]) * ratioW
-                var canvasY = (y - tsne_bbox[1]) * ratioH
+                let canvasX = (x - tsne_bbox[0]) * ratioW * drawRatioW
+                let canvasY = (y - tsne_bbox[1]) * ratioH * drawRatioH
                 ctx.moveTo(canvasX, canvasY)
                 ctx.arc(canvasX, canvasY, Math.max(height, width) / 50 * weights[i], 0, Math.PI*2);
             }
@@ -254,8 +265,8 @@
             ctx.fill();
             // Draw center dot
             ctx.beginPath();
-            ctx.arc((meanX - tsne_bbox[0]) * ratioW,
-                    (meanY - tsne_bbox[1]) * ratioH,
+            ctx.arc((meanX - tsne_bbox[0]) * ratioW * drawRatioW,
+                    (meanY - tsne_bbox[1]) * ratioH * drawRatioH,
                     Math.max(height, width) / 200, 0, Math.PI*2);
             ctx.fillStyle = "red";
             ctx.fill();
