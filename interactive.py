@@ -114,10 +114,10 @@ class App(QWidget):
         facenetPath = os.path.join(filePath, 'facenet')
         with open(os.path.join(filePath, 'data', 'thumbs-clean', 'delaunay.pkl'), 'rb') as f:
             self.tsne, self.tsneRect, self.tri = pickle.load(f)
-        with h5py.File(os.path.join(facenetPath, 'vae', '20180424-005429', 'attribute_vectors.h5'),'r') as f:
+        with h5py.File(os.path.join(filePath, 'vae', '20180424-005429', 'attribute_vectors.h5'),'r') as f:
             self.latentVars = np.array(f.get('latent_vars'))
         self.tree = KDTree(self.tsneRect)
-        modelPath = os.path.join(facenetPath, 'vae', '20180424-005429', 'model.ckpt-500')
+        modelPath = os.path.join(filePath, 'vae', '20180424-005429', 'model.ckpt-500')
         self.reconstructor = Decoder(modelPath)
         
         self.initUI()
