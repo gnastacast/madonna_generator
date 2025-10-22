@@ -14,14 +14,15 @@ import h5py
 import math
 import time
 from scipy import misc
-import matplotlib.pyplot as plt
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QMainWindow, QGraphicsDropShadowEffect, QGraphicsOpacityEffect
-from PyQt5.QtGui import QIcon, QPixmap, QTransform, QPainter, QImage, QRegion, QColor
-from PyQt5.QtCore import QRect, Qt
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QMainWindow, QGraphicsDropShadowEffect, QGraphicsOpacityEffect, QHBoxLayout
+from PyQt5.QtGui import QIcon, QPixmap, QTransform, QPainter, QImage, QRegion, QColor, QMouseEvent
+from PyQt5.QtCore import QRect, Qt, QEvent
 from sklearn.neighbors import KDTree
 from scipy.stats import norm
 import cv2
 import pickle
+from random import random
+from tsne_draw import MplCanvas
 
 import threading
 
@@ -105,10 +106,11 @@ def getLatentVars(latent_vars, model_path, indices):
 
 class App(QWidget):
 
-    def __init__(self):
+    def __init__(self, wander=False):
         super().__init__()
-        self.fgLabel = QLabel(self)
-        self.fgLabel.setAlignment(Qt.AlignCenter)
+        self.layout = QHBoxLayout()
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
         self.mousePos = (.5, .5)
         filePath = os.path.dirname(os.path.abspath(__file__))
         facenetPath = os.path.join(filePath, 'facenet')
@@ -116,30 +118,44 @@ class App(QWidget):
             self.tsne, self.tsneRect, self.tri = pickle.load(f)
         with h5py.File(os.path.join(filePath, 'vae', '20180424-005429', 'attribute_vectors.h5'),'r') as f:
             self.latentVars = np.array(f.get('latent_vars'))
+        bg = [46/255] * 3 # Monokai grey
+        line = [214/255] * 3 # Monokai white
+        self.figure = MplCanvas(bg, line, line + [0.2], self.tsne, self.tsneRect, self.tri, self, width=5, height=4, dpi=50)
+        self.figure.mpl_connect("button_press_event", self.onMouseGraphPress)
+        self.figure.mpl_connect("button_release_event", self.onMouseGraphRelease)
+        self.figure.mpl_connect("motion_notify_event", self.onMouseGraph)
+        self.figureDragging = False
+        self.layout.addWidget(self.figure)
+        self.imgLabel = QLabel(self)
+        self.imgLabel.setAlignment(Qt.AlignLeft)
+        self.layout.addWidget(self.imgLabel)
         self.tree = KDTree(self.tsneRect)
         modelPath = os.path.join(filePath, 'vae', '20180424-005429', 'model.ckpt-500')
         self.reconstructor = Decoder(modelPath)
-        
+        self.wander = wander
+        self.setLayout(self.layout)
         self.initUI()
         self.oldLatentVar= self.latentVars[0]
+
+    def onMouseGraphPress(self, event):
+        self.figureDragging = True
+        self.onMouseGraph(event)
+
+    def onMouseGraphRelease(self, event):
+        self.figureDragging = False
+        self.onMouseGraph(event)
+
+    def onMouseGraph(self, event):
+        if not self.figureDragging:
+            return
+        x, y = (event.x / self.figure.width(), 1 - event.y / self.figure.height())
+        if x > 1:
+            x = (event.x - self.figure.width()) / self.imgLabel.width()
+        self.mousePos = (x,y)
+        self.setLabelPos(x,y)
  
     def initUI(self):
         filePath = os.path.dirname(os.path.abspath(__file__))
-        self.bgImage = cv2.flip(cv2.imread(os.path.join(filePath, "data", "thumbs-clean", "delaunay.png"), 1), 0)
-        self.bgImage = cv2.cvtColor(self.bgImage.astype(np.uint8), cv2.COLOR_BGR2RGB)
-
-        # self.bgImage = cv2.imread("Thumbs-clean\\delaunay.png",0)
-        # self.bgImage = self.bgImage - np.min(self.bgImage)
-        # self.bgImage = self.bgImage / np.max(self.bgImage) * 255
-        # self.bgImage = cv2.cvtColor(self.bgImage.astype(np.uint8), cv2.COLOR_GRAY2RGB)
-        # bgMap = QPixmap("Thumbs-clean\\delaunay.png")
-        # bgLabel = QLabel(self)
-        # bgLabel.setPixmap(bgMap.scaled(self.height(), self.width()))
-
-        # self.fgLabel = QLabel(self)
-        # reconstruction = QPixmap("Thumbs-clean\\Virgin_Mary\\000.png")
-        # self.fgLabel.setPixmap(reconstruction.scaled(self.height(), self.width()))
-
         self.dotSize = 10
         self.label = QLabel(self)
         self.label.resize(self.dotSize, self.dotSize)
@@ -168,17 +184,16 @@ class App(QWidget):
 
     def resizeEvent(self, event):
         QWidget.resizeEvent(self, event)
-        self.fgLabel.setGeometry(0, 0, self.width(), self.height())
-        
+        self.imgLabel.setGeometry(0, 0, self.height(), self.height())
 
     def cleanUp(self):
         self.reconstructor.close()
 
-    def getLatentVar(self):
+    def getLatentVar(self, pos):
         dataPtp = np.max(self.tsneRect, axis=0) - np.min(self.tsneRect, axis=0)
         dataMin = np.min(self.tsneRect, axis=0)
         
-        p = np.array(self.mousePos) * dataPtp + dataMin
+        p = np.array(pos) * dataPtp + dataMin
         nPoints = 10
         dist, idx = self.tree.query(p.reshape(1, -1), k=nPoints)
         deviation = np.sqrt(np.sum(dist) ** 2 / nPoints - 1)
@@ -198,50 +213,54 @@ class App(QWidget):
     def print_time(self):
         count = 0
         idleCount = 0
-        oldLatentVar = self.latentVars[0]
+        oldPos = (0,0)
+        wanderDir = np.array((1,0))
+        wanderPos = np.array((0.5,0.5))
         while True:
             count += 1
-            latentVar, maxDist = self.getLatentVar()
-            if np.all(np.isclose(oldLatentVar, latentVar)):
+            pos = self.mousePos
+            if idleCount > 100 and self.wander:
+                rot = np.random.random() * 1 - 0.5
+                mat = np.array([
+                    [np.cos(rot), -np.sin(rot)],
+                    [np.sin(rot),  np.cos(rot)]
+                ])
+                wanderDir = (mat @ wanderDir).flatten()
+                wanderPos += wanderDir * 0.02
+                for i in range(2):
+                    if wanderPos[i] > 1 or wanderPos[i] < 0:
+                        wanderDir[i] *= -1
+                        wanderPos[i] = np.min([wanderPos[i], 1])
+                        wanderPos[i] = np.max([wanderPos[i], 0])
+                pos = wanderPos
+                dotSize = 10
+                self.setLabelPos(*pos)
+            latentVar, maxDist = self.getLatentVar(pos)
+            if np.all(np.isclose(self.mousePos, oldPos)):
                 time.sleep(.01)
                 idleCount += 1
-                if idleCount > 100:
+                if idleCount > 100 and not self.wander:
                     delay = 10
-                    idlePos = min((idleCount - 100) / delay, 1) * np.pi / 2
-                    idleSize = np.sin(idlePos) * 300
+                    idleScale = min((idleCount - 100) / delay, 1) * np.pi / 2
+                    idleSize = np.sin(idleScale) * 300
                     self.idleLabel.setGeometry((self.width() - self.height() - idleSize) / 2, (self.height() - idleSize) / 2, idleSize, idleSize)
                     self.idleLabel.setMask(QRegion(self.idleLabel.rect(), QRegion.Ellipse))
                     self.idleLabel.setVisible(True)
-                continue
+                    continue
+            else:
+                idleCount = 0
+            oldPos = self.mousePos
             self.idleLabel.setVisible(False)
-            idleCount = 0
-            oldLatentVar = latentVar
             cvImg = self.reconstructor.reconstruct([latentVar])[0]
             cvImg *= 255
             cvImg = cvImg.astype(np.uint8)
-            cvImg = cv2.resize(cvImg, (self.fgLabel.height(), self.fgLabel.height()))#, interpolation = cv2.INTER_NEAREST)
-            netImg = cv2.resize(self.bgImage, (self.fgLabel.width() - self.fgLabel.height(), self.fgLabel.height()))
-            cvImg = np.hstack((netImg, cvImg))
-            # # Create distance function for overlay
-            # dist = np.ones((cvImg.shape[0], cvImg.shape[1]), dtype=np.uint8)
-            # # Normalize mouse positions
-            # x, y = np.clip(self.mousePos, 0, 0.999)
-            # x, y = int(x * dist.shape[0]), int(y * dist.shape[1])
-            # # Mark a zero for distance function
-            # dist[y, x] = 0
-            # dist = cv2.distanceTransform(dist, cv2.DIST_L2, 0)
-            # fade = maxDist
-            # dist = np.clip(fade - dist / np.max(dist), 0, 1) / fade
-            # bgImage = cv2.resize(self.bgImage, cvImg.shape[0:2])
-            # # cvImg = np.multiply(cvImg, np.multiply(dist[:,:,np.newaxis], 1 - bgImage / 255)).astype(np.uint8)
-            # mask = np.multiply(dist[:,:,np.newaxis], 1 - bgImage / 255)
-            # cvImg = np.multiply(cvImg, 1 - mask).astype(np.uint8)
+            cvImg = cv2.resize(cvImg, (self.imgLabel.height(), self.imgLabel.height()))#, interpolation = cv2.INTER_NEAREST)
             height, width, channel = cvImg.shape
             bytesPerLine = 3 * width
             qImg = QImage(cvImg.data, width, height, bytesPerLine, QImage.Format_RGB888)
             reconstruction = QPixmap(qImg)
             self.lock.acquire()
-            self.fgLabel.setPixmap(reconstruction)
+            self.imgLabel.setPixmap(reconstruction)
             self.lock.release()
             time.sleep(.001)
 
@@ -249,20 +268,19 @@ class App(QWidget):
         self.mouseMoveEvent(event)
 
     def mouseMoveEvent(self, event):
-        pos = self.fgLabel.mapFromGlobal(event.globalPos())
-        height, width = self.fgLabel.height(), self.fgLabel.width()
-        x, y = pos.x() / self.fgLabel.height(), pos.y() / self.fgLabel.height()
-        dividingLine = (width - height) / height
-        if x < dividingLine:
-           x = x / dividingLine
-        else:
-           x = x - dividingLine
+        pos = self.imgLabel.mapFromGlobal(event.globalPos())
+        height, width = self.height(), self.width()
+        x, y = pos.x() / height, pos.y() / height
+        if x < 0:
+            x = event.x() / self.figure.width()
         # self.mousePos = ((x - offsetX)/w, 1 - (y-offsetY)/h)
         self.mousePos = (x,y)
+        self.setLabelPos(x,y)
+
+    def setLabelPos(self, x, y):
         dotSize = 10
-        self.label.setGeometry(x * (width - height) - dotSize // 2, event.y() - dotSize // 2, dotSize, dotSize)
-        # # self.label.setGeometry(w * self.mousePos[0] - dotSize // 2,  h * (1 - self.mousePos[1]) - dotSize // 2, dotSize, dotSize)
-        self.repaint()
+        height, width = self.height(), self.width()
+        self.label.setGeometry(x * (width - height) - dotSize // 2, y * height - dotSize // 2, dotSize, dotSize)
 
 
 if __name__ == '__main__':
@@ -274,7 +292,7 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     QApplication.setOverrideCursor(Qt.BlankCursor);
     mw = QMainWindow()
-    ex = App()
+    ex = App(True)
     mw.setCentralWidget(ex)
     app.aboutToQuit.connect(ex.cleanUp)
     # mw.resize(720,480)
