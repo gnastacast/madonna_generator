@@ -1,3 +1,7 @@
+generated/mary_*.png
+generated/mary_*.pdf
+generated/mary_metadata.csv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

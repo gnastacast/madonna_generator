@@ -106,7 +106,7 @@ def getLatentVars(latent_vars, model_path, indices):
 
 class App(QWidget):
 
-    def __init__(self, wander=False):
+    def __init__(self, wander=False, save=False):
         super().__init__()
         self.layout = QHBoxLayout()
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -136,6 +136,8 @@ class App(QWidget):
         self.setLayout(self.layout)
         self.initUI()
         self.oldLatentVar= self.latentVars[0]
+        self.clickCount = 0
+        self.save = save
 
     def onMouseGraphPress(self, event):
         self.figureDragging = True
@@ -143,6 +145,7 @@ class App(QWidget):
 
     def onMouseGraphRelease(self, event):
         self.figureDragging = False
+        self.clickCount += 1
         self.onMouseGraph(event)
 
     def onMouseGraph(self, event):
@@ -211,13 +214,12 @@ class App(QWidget):
 
     # Define a function for the thread
     def print_time(self):
-        count = 0
+        lastClick = 0
         idleCount = 0
         oldPos = (0,0)
         wanderDir = np.array((1,0))
         wanderPos = np.array((0.5,0.5))
         while True:
-            count += 1
             pos = self.mousePos
             if idleCount > 100 and self.wander:
                 rot = np.random.random() * 1 - 0.5
@@ -254,6 +256,9 @@ class App(QWidget):
             cvImg = self.reconstructor.reconstruct([latentVar])[0]
             cvImg *= 255
             cvImg = cvImg.astype(np.uint8)
+            if self.save and lastClick != self.clickCount:
+                lastClick = self.clickCount
+                self.saveImage(cv2.cvtColor(cvImg, cv2.COLOR_BGR2RGB), lastClick, latentVar)
             cvImg = cv2.resize(cvImg, (self.imgLabel.height(), self.imgLabel.height()))#, interpolation = cv2.INTER_NEAREST)
             height, width, channel = cvImg.shape
             bytesPerLine = 3 * width
@@ -264,8 +269,27 @@ class App(QWidget):
             self.lock.release()
             time.sleep(.001)
 
-    def mousePressEvent(self,event):
+    def mousePressEvent(self, event):
         self.mouseMoveEvent(event)
+
+
+    def saveImage(self, img, ID, latentVar=None):
+        # Save image
+        name = "mary_%02i.png" % (ID % 100)
+        filePath = os.path.dirname(os.path.abspath(__file__))
+        imgFolder = os.path.join(filePath, 'generated')
+        os.makedirs(imgFolder, exist_ok=True)
+        cv2.imwrite(os.path.join(imgFolder, name) , img)
+        if latentVar is None:
+            return
+        # Write image metadata
+        metadataFile = os.path.join(imgFolder, "mary_metadata.csv")
+        writeType = "w" if ID % 100 == 0 else "a"
+        with open(metadataFile, writeType) as f:
+            f.write(name)
+            for v in latentVar:
+                f.write(", %0.3f" % (v))
+            f.write("\n")
 
     def mouseMoveEvent(self, event):
         pos = self.imgLabel.mapFromGlobal(event.globalPos())
@@ -292,7 +316,7 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     QApplication.setOverrideCursor(Qt.BlankCursor);
     mw = QMainWindow()
-    ex = App(True)
+    ex = App(wander=True, save=True)
     mw.setCentralWidget(ex)
     app.aboutToQuit.connect(ex.cleanUp)
     # mw.resize(720,480)
