@@ -5,10 +5,20 @@
     <link rel="stylesheet" href="./css/normalize.css"/>
     <style type="text/css">
         html, body { min-height: 100%; }
+        body{
+            background: #000;
+            color:grey
+        }
     </style>
     <meta charset="utf-8">
 </head>
 <body>
+    <div id="loading" style="font-family: monospace; position:absolute; top:50%; left:50%; transform: translate(-50%, -50%); font-size: 2rem">
+        <div style="width:50vw;text-align: center;">
+            <p>Loading... </p>
+            <img src="cargando.gif" style="width:30%;"/>
+        </div>
+    </div>
     <div id="wrapper" style="overflow:hidden; height:100vh; width:100vw;">
         <div id="output" style="height:10vh; width:110vw; background-color:black;">
             <canvas id="the_canvas" style="height:100vmin; width:100vmin; position:absolute; left:0; top:0;">
@@ -25,7 +35,6 @@
         </div>
     </div>
     <div id="info" style="position:absolute; right:1vw; top:1vw; font-size: 5rem"><a href="poster.pdf" style="text-decoration: none">📃</a></div>
-
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
     <script src="./js/kdTree.js"></script>
     <script type="text/javascript">
